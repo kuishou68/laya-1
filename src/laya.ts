@@ -10,7 +10,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import * as ort from "onnxruntime-node";
 import { Tokenizer } from "@huggingface/tokenizers";
-import { buildSequence, confidenceFromProbs, QTYPES, renderOptions, softmax, tempBucket, toInternal, type SpecialIds } from "./sequence.js";
+import { buildSequence, clampTemperatures, confidenceFromProbs, QTYPES, renderOptions, softmax, tempBucket, toInternal, type SpecialIds } from "./sequence.js";
 import { ensureBundle, type DownloadOptions } from "./download.js";
 import type { Answer, LayaConfig, Question, SystemOneResult } from "./types.js";
 
@@ -41,7 +41,7 @@ export class Laya {
   static async load(opts: LayaOptions = {}): Promise<Laya> {
     const modelDir = opts.modelDir ? path.resolve(opts.modelDir) : await ensureBundle(opts);
     const read = async (f: string): Promise<unknown> => JSON.parse(await readFile(path.join(modelDir, f), "utf8"));
-    const config = (await read("laya_config.json")) as LayaConfig;
+    const config = clampTemperatures((await read("laya_config.json")) as LayaConfig);
     const tok = new Tokenizer((await read("tokenizer/tokenizer.json")) as object, (await read("tokenizer/tokenizer_config.json")) as object);
     const id = (t: string) => {
       const v = tok.token_to_id(t);

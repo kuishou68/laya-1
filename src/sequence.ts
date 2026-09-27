@@ -3,7 +3,7 @@
  * option rendering, sequence layout, temperature buckets, confidence. Kept separate from the
  * ONNX session so it can be unit-tested without the weights.
  */
-import type { Question, QuestionType } from "./types.js";
+import type { LayaConfig, Question, QuestionType } from "./types.js";
 
 export const QTYPES: Record<QuestionType, number> = { choice: 0, score: 1, noul: 2 };
 const QTYPE_NAMES: QuestionType[] = ["choice", "score", "noul"];
@@ -65,6 +65,32 @@ function sizeBucket(k: number): string {
 /** Key for the per-cardinality temperature: a 2-option noul and a 20-option choice need different scaling. */
 export function tempBucket(qtype: number, k: number): string {
   return `${QTYPE_NAMES[qtype]}:${sizeBucket(k)}`;
+}
+
+export const TEMP_MIN = 0.5;
+export const TEMP_MAX = 5;
+
+/**
+ * Clamp every checkpoint temperature to [TEMP_MIN, TEMP_MAX], as upstream laya (>= 0.3.5) does in
+ * laya/common.py before any temperature is used. The published checkpoint still ships
+ * choice:11+ = 0.1005..., which divides that bucket's logits by ~1/10 and makes every 11+ option
+ * answer come back ~99% confident. Returns a new config; the input is not mutated.
+ */
+export function clampTemperatures(config: LayaConfig): LayaConfig {
+  const changed: string[] = [];
+  const clamp = (key: string, t: number): number => {
+    const v = Math.min(TEMP_MAX, Math.max(TEMP_MIN, t));
+    if (v !== t) changed.push(`${key} ${t} -> ${v}`);
+    return v;
+  };
+  const temperature = config.temperature.map((t, i) => clamp(QTYPE_NAMES[i] ?? String(i), t)) as [number, number, number];
+  const temperature_by_options = Object.fromEntries(Object.entries(config.temperature_by_options).map(([k, t]) => [k, clamp(k, t)]));
+  if (changed.length > 0) {
+    console.warn(
+      `laya: this checkpoint ships temperatures outside [${TEMP_MIN}, ${TEMP_MAX}]: ${changed.join(", ")}. Treat confidence from the affected entries as uncalibrated.`,
+    );
+  }
+  return { ...config, temperature, temperature_by_options };
 }
 
 /** Jev-style confidence: 1 - normalized entropy of the answer distribution. */
