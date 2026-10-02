@@ -8,6 +8,7 @@ import {
   renderOptions,
   softmax,
   tempBucket,
+  temperatureFor,
   toInternal,
   type SpecialIds,
 } from "../src/sequence.js";
@@ -115,10 +116,33 @@ test("clampTemperatures clamps out-of-range values to [0.5, 5] and leaves valid 
   };
   const clamped = clampTemperatures(config);
   assert.deepEqual(clamped.temperature, [1.31, 0.5, 5]);
-  assert.equal(clamped.temperature_by_options["choice:2"], 1.98);
-  assert.equal(clamped.temperature_by_options["choice:11+"], 0.5);
-  assert.equal(clamped.temperature_by_options["noul:2"], 1.2);
+  assert.equal(clamped.temperature_by_options?.["choice:2"], 1.98);
+  assert.equal(clamped.temperature_by_options?.["choice:11+"], 0.5);
+  assert.equal(clamped.temperature_by_options?.["noul:2"], 1.2);
   // the input config is not mutated, so user-supplied overrides after load() keep working
   assert.deepEqual(config.temperature, [1.31, 0.25, 7]);
-  assert.equal(config.temperature_by_options["choice:11+"], 0.10058280825614929);
+  assert.equal(config.temperature_by_options?.["choice:11+"], 0.10058280825614929);
+});
+
+test("clampTemperatures accepts fine-tuned configs without per-option temperatures", () => {
+  const config: LayaConfig = { max_len: 512, head_max_len: 192, temperature: [1.31, 1.05, 2] };
+  assert.deepEqual(clampTemperatures(config), { ...config, temperature_by_options: {} });
+  assert.equal(temperatureFor(config, 0, 11), 1.31);
+});
+
+test("temperatureFor clamps the current value at point of use", () => {
+  const config = clampTemperatures({
+    max_len: 512,
+    head_max_len: 192,
+    temperature: [1.31, 1.05, 2],
+    temperature_by_options: { "choice:2": 1.98 },
+  });
+  const options = config.temperature_by_options;
+  assert.ok(options);
+  options["choice:2"] = 0.1;
+  assert.equal(temperatureFor(config, 0, 2), 0.5);
+  options["choice:2"] = Number.NaN;
+  assert.equal(temperatureFor(config, 0, 2), 1.31);
+  options["choice:2"] = "not a number" as unknown as number;
+  assert.equal(temperatureFor(config, 0, 2), 1.31);
 });

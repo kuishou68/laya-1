@@ -10,7 +10,17 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import * as ort from "onnxruntime-node";
 import { Tokenizer } from "@huggingface/tokenizers";
-import { buildSequence, clampTemperatures, confidenceFromProbs, QTYPES, renderOptions, softmax, tempBucket, toInternal, type SpecialIds } from "./sequence.js";
+import {
+  buildSequence,
+  clampTemperatures,
+  confidenceFromProbs,
+  QTYPES,
+  renderOptions,
+  softmax,
+  temperatureFor,
+  toInternal,
+  type SpecialIds,
+} from "./sequence.js";
 import { ensureBundle, type DownloadOptions } from "./download.js";
 import type { Answer, LayaConfig, Question, SystemOneResult } from "./types.js";
 
@@ -116,7 +126,7 @@ export class Laya {
     items.forEach((it, r) => {
       const qid = qids[r] as string;
       const k = it.markers.length;
-      const temp = this.config.temperature_by_options[tempBucket(it.qtype, k)] ?? this.config.temperature[it.qtype] ?? 1;
+      const temp = temperatureFor(this.config, it.qtype, k);
       const p = softmax(Array.from(logits.subarray(r * K, r * K + k), (v) => v / temp));
       const ext = { act_probability: actData[r * nAct] ?? 0 };
       const q = it.q;

@@ -71,23 +71,36 @@ export const TEMP_MIN = 0.5;
 export const TEMP_MAX = 5;
 
 /**
- * Clamp every checkpoint temperature to [TEMP_MIN, TEMP_MAX], as upstream laya (>= 0.3.5) does in
- * laya/common.py before any temperature is used. The published checkpoint still ships
- * choice:11+ = 0.1005..., which divides that bucket's logits by ~1/10 and makes every 11+ option
- * answer come back ~99% confident. Returns a new config; the input is not mutated.
+ * Return a finite temperature in the supported range. Invalid values use the supplied fallback,
+ * so malformed checkpoint data cannot turn logits or softmax into NaN.
  */
+export function clampTemperature(value: unknown, fallback = 1): number {
+  const t = typeof value === "number" && Number.isFinite(value) ? value : fallback;
+  return Math.min(TEMP_MAX, Math.max(TEMP_MIN, t));
+}
+
+/** Resolve and clamp the temperature immediately before it is used for logits. */
+export function temperatureFor(config: LayaConfig, qtype: number, k: number): number {
+  const bucketValue = config.temperature_by_options?.[tempBucket(qtype, k)];
+  const baseValue = config.temperature[qtype];
+  const bucketIsFinite = typeof bucketValue === "number" && Number.isFinite(bucketValue);
+  const baseIsFinite = typeof baseValue === "number" && Number.isFinite(baseValue);
+  return clampTemperature(bucketIsFinite ? bucketValue : baseIsFinite ? baseValue : 1);
+}
+
+/** Clamp checkpoint temperatures without mutating the input config. */
 export function clampTemperatures(config: LayaConfig): LayaConfig {
   const changed: string[] = [];
-  const clamp = (key: string, t: number): number => {
-    const v = Math.min(TEMP_MAX, Math.max(TEMP_MIN, t));
-    if (v !== t) changed.push(`${key} ${t} -> ${v}`);
+  const clamp = (key: string, t: unknown): number => {
+    const v = clampTemperature(t);
+    if (v !== t) changed.push(`${key} ${String(t)} -> ${v}`);
     return v;
   };
   const temperature = config.temperature.map((t, i) => clamp(QTYPE_NAMES[i] ?? String(i), t)) as [number, number, number];
-  const temperature_by_options = Object.fromEntries(Object.entries(config.temperature_by_options).map(([k, t]) => [k, clamp(k, t)]));
+  const temperature_by_options = Object.fromEntries(Object.entries(config.temperature_by_options ?? {}).map(([k, t]) => [k, clamp(k, t)]));
   if (changed.length > 0) {
     console.warn(
-      `laya: this checkpoint ships temperatures outside [${TEMP_MIN}, ${TEMP_MAX}]: ${changed.join(", ")}. Treat confidence from the affected entries as uncalibrated.`,
+      `laya: this checkpoint ships invalid or out-of-range temperatures: ${changed.join(", ")}. Treat confidence from the affected entries as uncalibrated.`,
     );
   }
   return { ...config, temperature, temperature_by_options };
